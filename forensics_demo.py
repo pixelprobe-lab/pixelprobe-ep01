@@ -6,15 +6,15 @@ D=os.path.dirname(os.path.abspath(__file__)); OUT=f"{D}/output"; os.makedirs(OUT
 def make_photo(w=1200,h=800,seed=7):
     """程式生成一張『風景照』：天空漸層、草地紋理、房子、樹，加感光雜訊。"""
     rng=np.random.default_rng(seed); img=np.zeros((h,w,3),np.float32)
-    for y in range(h//2): img[y]=(235-y*0.3,190-y*0.2,120)            # 天空 BGR
+    for y in range(h//2): img[y]=(235-y*0.3,190-y*0.2,120)            # 天空 sky (BGR)
     g=rng.normal(0,1,(h//2,w)); g=cv2.GaussianBlur(g,(0,0),3)*25
-    img[h//2:]=np.dstack([60+g,140+g,70+g])                             # 草地
-    cv2.rectangle(img,(300,280),(560,520),(90,110,170),-1)              # 房子
+    img[h//2:]=np.dstack([60+g,140+g,70+g])                             # 草地 grass
+    cv2.rectangle(img,(300,280),(560,520),(90,110,170),-1)              # 房子 house
     pts=np.array([[280,280],[430,170],[580,280]]); cv2.fillPoly(img,[pts],(40,40,140))
     cv2.rectangle(img,(400,400),(460,520),(30,50,80),-1)
     for x in (800,950):
         cv2.rectangle(img,(x-12,380),(x+12,560),(30,60,90),-1); cv2.circle(img,(x,350),70,(40,120,40),-1)
-    img+=rng.normal(0,4,img.shape)                                      # 感光雜訊
+    img+=rng.normal(0,4,img.shape)                                      # 感光雜訊 sensor noise
     return np.clip(img,0,255).astype(np.uint8)
 
 def jpeg(img,q):
@@ -38,12 +38,12 @@ def copy_move(img):
     kp,des=orb.detectAndCompute(g,None); bf=cv2.BFMatcher(cv2.NORM_HAMMING)
     out=img.copy(); pairs=[]
     for m in bf.knnMatch(des,des,k=3):
-        for c in m[1:]:   # 跳過自己
+        for c in m[1:]:   # 跳過自己 skip self-match
             p,q=np.array(kp[c.queryIdx].pt),np.array(kp[c.trainIdx].pt)
             if c.distance<40 and np.linalg.norm(p-q)>60:
                 if q[0]<p[0]: p,q=q,p
                 pairs.append((p,q)); break
-    # 複製貼上的特徵點會有「相同位移向量」：投票找最多的位移
+    # 複製貼上的特徵點會有「相同位移向量」：投票找最多的位移 / copied keypoints share the same displacement vector: vote for the most common shift
     from collections import Counter
     votes=Counter(tuple((np.round((q-p)/8)).astype(int)) for p,q in pairs)
     n=0
@@ -58,12 +58,12 @@ def copy_move(img):
 
 if __name__=="__main__":
     base=make_photo()
-    # 原圖：相機式 JPEG q=92 + EXIF
+    # 原圖：相機式 JPEG q=92 + EXIF / original: camera-style JPEG q=92 + EXIF
     orig,_=jpeg(base,92)
     exif=Image.Exif(); exif[0x010F]="DemoCam"; exif[0x0110]="DemoCam X1"; exif[0x0132]="2026:10:20 09:15:00"
     buf=io.BytesIO(); Image.fromarray(cv2.cvtColor(orig,cv2.COLOR_BGR2RGB)).save(buf,"JPEG",quality=92,exif=exif)
     open(f"{OUT}/01_original.jpg","wb").write(buf.getvalue())
-    # 竄改 1：用右邊的天空+草地蓋掉第二棵樹（copy-move 移除物件）；竄改 2：貼上低品質壓縮過的『UFO』
+    # 竄改 1：用右邊的天空+草地蓋掉第二棵樹（copy-move 移除物件）；竄改 2：貼上低品質壓縮過的『UFO』 / edit 1: cover the 2nd tree with copied sky+grass; edit 2: paste a low-quality "UFO"
     fake=orig.copy(); fake[270:580,875:1030]=orig[270:580,1040:1195]
     ufo=np.full((90,200,3),(200,200,200),np.uint8); cv2.ellipse(ufo,(100,50),(95,30),0,0,360,(80,80,90),-1)
     cv2.ellipse(ufo,(100,35),(40,25),0,180,360,(160,200,220),-1); ufo,_=jpeg(cv2.GaussianBlur(ufo,(3,3),0),50)
