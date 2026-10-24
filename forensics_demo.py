@@ -1,10 +1,14 @@
-"""EP01 抓P圖：ELA、雜訊殘差、複製貼上偵測、EXIF 檢查（全部使用程式自製影像）"""
+"""EP01 抓P圖：ELA、雜訊殘差、複製貼上偵測、EXIF 檢查（全部使用程式自製影像）
+EP01 spot the edit: ELA, noise residual, copy-move detection, EXIF check (all images are synthetic)
+"""
 import cv2, numpy as np, os, io
 from PIL import Image
 D=os.path.dirname(os.path.abspath(__file__)); OUT=f"{D}/output"; os.makedirs(OUT,exist_ok=True)
 
 def make_photo(w=1200,h=800,seed=7):
-    """程式生成一張『風景照』：天空漸層、草地紋理、房子、樹，加感光雜訊。"""
+    """程式生成一張『風景照』：天空漸層、草地紋理、房子、樹，加感光雜訊。
+    Generate a synthetic "landscape photo": sky gradient, grass texture, house, trees, plus sensor noise.
+    """
     rng=np.random.default_rng(seed); img=np.zeros((h,w,3),np.float32)
     for y in range(h//2): img[y]=(235-y*0.3,190-y*0.2,120)            # 天空 sky (BGR)
     g=rng.normal(0,1,(h//2,w)); g=cv2.GaussianBlur(g,(0,0),3)*25
@@ -18,13 +22,16 @@ def make_photo(w=1200,h=800,seed=7):
     return np.clip(img,0,255).astype(np.uint8)
 
 def jpeg(img,q):
+    """以品質 q 壓成 JPEG 再解回 / encode to JPEG at quality q and decode back"""
     ok,b=cv2.imencode(".jpg",img,[cv2.IMWRITE_JPEG_QUALITY,q]); return cv2.imdecode(b,1), b.tobytes()
 
 def ela(img_bytes,q=90,scale=40):
+    """ELA 錯誤等級分析：重新壓縮後放大差異 / Error Level Analysis: recompress and amplify the difference"""
     a=cv2.imdecode(np.frombuffer(img_bytes,np.uint8),1); r,_=jpeg(a,q)
     return np.clip(cv2.absdiff(a,r).astype(np.float32)*scale,0,255).astype(np.uint8)
 
 def noise_map(img,k=16):
+    """每 k×k 區塊的雜訊強度熱圖 / heat map of noise strength per k×k block"""
     g=cv2.cvtColor(img,cv2.COLOR_BGR2GRAY).astype(np.float32)
     res=g-cv2.medianBlur(g.astype(np.uint8),3).astype(np.float32)
     h,w=g.shape; m=np.zeros((h//k,w//k),np.float32)
@@ -34,6 +41,7 @@ def noise_map(img,k=16):
     return cv2.applyColorMap(cv2.resize(m,(w,h),interpolation=cv2.INTER_NEAREST),cv2.COLORMAP_JET)
 
 def copy_move(img):
+    """ORB 特徵自我比對 + 位移向量投票，找出複製貼上區域 / ORB self-matching + displacement voting to find copy-move regions"""
     g=cv2.cvtColor(img,cv2.COLOR_BGR2GRAY); orb=cv2.ORB_create(20000,fastThreshold=5)
     kp,des=orb.detectAndCompute(g,None); bf=cv2.BFMatcher(cv2.NORM_HAMMING)
     out=img.copy(); pairs=[]
@@ -57,6 +65,7 @@ def copy_move(img):
     return out,n
 
 if __name__=="__main__":
+    # 1. 生成示範照片 / generate the demo photo
     base=make_photo()
     # 原圖：相機式 JPEG q=92 + EXIF / original: camera-style JPEG q=92 + EXIF
     orig,_=jpeg(base,92)
@@ -73,11 +82,14 @@ if __name__=="__main__":
     im=Image.open(io.BytesIO(fb)); e=Image.Exif(); e[0x0131]="PhotoEditor 3.1"; e[0x0132]="2026:10:21 23:48:10"
     buf=io.BytesIO(); im.save(buf,"JPEG",quality=92,exif=e); open(f"{OUT}/02_fake.jpg","wb").write(buf.getvalue())
     fake_bytes=buf.getvalue(); fake_img=cv2.imdecode(np.frombuffer(fake_bytes,np.uint8),1)
+    # 2. 執行 4 種分析並存檔 / run the 4 analyses and save outputs
     cv2.imwrite(f"{OUT}/03_ela_original.png",ela(open(f"{OUT}/01_original.jpg","rb").read()))
     cv2.imwrite(f"{OUT}/04_ela_fake.png",ela(fake_bytes))
     cv2.imwrite(f"{OUT}/05_noise_fake.png",noise_map(fake_img))
     cm,n=copy_move(fake_img); cv2.imwrite(f"{OUT}/06_copymove.png",cm)
     cm0,n0=copy_move(cv2.imread(f"{OUT}/01_original.jpg"))
+    # 3. 印出 EXIF 與偵測結果 / print EXIF and detection results
     for name in ("01_original.jpg","02_fake.jpg"):
-        ex=Image.open(f"{OUT}/{name}").getexif(); print(name,{Image.ExifTags.TAGS.get(k,k):v for k,v in ex.items()})
-    print(f"copy-move matches: original={n0} fake={n}")
+        ex=Image.open(f"{OUT}/{name}").getexif(); print(name,"EXIF 檔案資訊 / metadata:",{Image.ExifTags.TAGS.get(k,k):v for k,v in ex.items()})
+    print(f"複製貼上匹配數 copy-move matches: 原圖 original={n0}  竄改圖 fake={n}")
+    print(f"結果已存到 Results saved to: {OUT}")

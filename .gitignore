@@ -1,4 +1,7 @@
+# 執行結果圖片 generated output images
 output/
+# Python 快取 Python cache
 __pycache__/
-.venv/
 *.pyc
+# 虛擬環境 virtual environment
+.venv/
